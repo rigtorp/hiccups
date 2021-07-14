@@ -20,6 +20,11 @@ by thread context switching, interrupt processing, TLB shootdowns etc.
 *hiccups* was inspired by [David Riddoch's](mailto:david@riddoch.org.uk)
 [sysjitter](https://www.openonload.org/download/sysjitter/sysjitter-1.4.tgz).
 
+Linux kernel version 5.14 introduces the [*osnoise
+tracer*](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/Documentation/trace/osnoise-tracer.rst)
+that also measures the system jitter / noise. It additionally shows you the
+sources of the jitter.
+
 ## Example
 
 Measure jitter on CPUs 0 through 3:
