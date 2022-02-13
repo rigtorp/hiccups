@@ -145,7 +145,8 @@ int main(int argc, char *argv[]) {
     std::sort(s.begin(), s.end());
     std::cout << cpu << " " << threshold.count() << " " << s.size() << " "
               << s[s.size() * 0.99].count() << " "
-              << s[s.size() * 0.999].count() << " " << s.back().count()
+              << s[s.size() * 0.999].count() << " "
+              << (!s.empty() ? s.back().count() : 0)
               << std::endl;
   }
 
