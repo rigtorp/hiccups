@@ -144,9 +144,9 @@ int main(int argc, char *argv[]) {
   for (auto &[cpu, s] : samples) {
     std::sort(s.begin(), s.end());
     std::cout << cpu << " " << threshold.count() << " " << s.size() << " "
-              << s[s.size() * 0.99].count() << " "
-              << s[s.size() * 0.999].count() << " " << s.back().count()
-              << std::endl;
+              << (s.empty() ? 0 : s[s.size() * 0.99].count()) << " "
+              << (s.empty() ? 0 : s[s.size() * 0.999].count()) << " "
+              << (s.empty() ? 0 : s.back().count()) << std::endl;
   }
 
   return 0;
