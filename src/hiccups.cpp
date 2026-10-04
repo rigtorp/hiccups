@@ -12,6 +12,7 @@
 #include <chrono>
 #include <iostream>
 #include <map>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -82,17 +83,12 @@ int main(int argc, char *argv[]) {
     samples[cpu].reserve(nsamples);
   }
 
-  // avoid page faults and TLB shootdowns when saving samples
-  if (mlockall(MCL_CURRENT | MCL_FUTURE) == -1) {
-    perror("mlockall");
-    std::cerr << "WARNING failed to lock memory, increase RLIMIT_MEMLOCK "
-                 "or run with CAP_IPC_LOC capability.\n";
-  }
-
-  const auto deadline = std::chrono::steady_clock::now() + runtime;
+  enum class Start { waiting, running, cancelled };
+  std::atomic<Start> start{Start::waiting};
+  std::chrono::steady_clock::time_point deadline;
   std::atomic<size_t> active_threads = {0};
 
-  auto func = [&](int cpu) {
+  auto pin = [](int cpu) {
     // pin current thread to assigned CPU
     cpu_set_t set;
     CPU_ZERO(&set);
@@ -101,13 +97,18 @@ int main(int argc, char *argv[]) {
       perror("sched_setaffinity");
       exit(1);
     }
+  };
 
+  auto func = [&](int cpu) {
     auto &s = samples[cpu];
-    active_threads.fetch_add(1, std::memory_order_release);
-
-    // wait for all threads to be ready
-    while (active_threads.load(std::memory_order_relaxed) != cpus.size())
-      ;
+    // The release/acquire handshake also publishes the measurement deadline.
+    Start state;
+    while ((state = start.load(std::memory_order_acquire)) == Start::waiting) {
+      std::this_thread::yield();
+    }
+    if (state == Start::cancelled) {
+      return;
+    }
 
     // run jitter measurement loop
     auto ts1 = std::chrono::steady_clock::now();
@@ -129,9 +130,40 @@ int main(int argc, char *argv[]) {
 
   // start measurements threads
   std::vector<std::thread> threads;
-  for (auto it = ++cpus.begin(); it != cpus.end(); ++it) {
-    threads.emplace_back([&, cpu = *it] { func(cpu); });
+  threads.reserve(cpus.size() - 1);
+  try {
+    for (auto it = ++cpus.begin(); it != cpus.end(); ++it) {
+      threads.emplace_back([&, cpu = *it] {
+        pin(cpu);
+        active_threads.fetch_add(1, std::memory_order_release);
+        func(cpu);
+      });
+    }
+  } catch (const std::system_error &e) {
+    start.store(Start::cancelled, std::memory_order_release);
+    for (auto &t : threads) {
+      t.join();
+    }
+    std::cerr << "Failed to create measurement thread: " << e.what()
+              << ". Check process/thread limits and available memory.\n";
+    return 1;
   }
+
+  pin(cpus.front());
+  while (active_threads.load(std::memory_order_acquire) != threads.size()) {
+    std::this_thread::yield();
+  }
+
+  // Allocate worker stacks before MCL_FUTURE can restrict new mappings.
+  // Lock memory before starting measurements to avoid setup-induced jitter.
+  if (mlockall(MCL_CURRENT | MCL_FUTURE) == -1) {
+    perror("mlockall");
+    std::cerr << "WARNING failed to lock memory, increase RLIMIT_MEMLOCK "
+                 "or run with CAP_IPC_LOCK capability.\n";
+  }
+
+  deadline = std::chrono::steady_clock::now() + runtime;
+  start.store(Start::running, std::memory_order_release);
   func(cpus.front());
 
   // wait for all threads to finish
