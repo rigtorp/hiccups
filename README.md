@@ -42,8 +42,10 @@ percentile being much lower then the other CPUs.
 
 ## Building & Installing
 
-*hiccups* requires [CMake](https://cmake.org/) 3.2 or higher and a C++17
-compiler.
+*hiccups* requires Linux, [CMake](https://cmake.org/) 3.20 or higher and a C++17
+compiler. GCC and Clang are tested in CI. Tests are enabled by default and also
+require Python 3 and a C compiler for the test hooks. Use `-DBUILD_TESTING=OFF`
+to build only the executable.
 
 Measurements start after all worker threads are ready and memory locking has
 been attempted. Memory locking includes worker stacks as well as sample buffers;
@@ -52,37 +54,54 @@ without locked memory. Increase the limit or grant `CAP_IPC_LOCK` if locked
 memory is required. Failure to create a worker thread exits with an error;
 check process/thread limits and available memory.
 
-Building on Debian/Ubuntu:
+Install build dependencies on Debian/Ubuntu:
 
 ```
-sudo apt install cmake g++
+sudo apt install cmake g++ python3
+```
+
+Configure, build, and test:
+
+```
 cd hiccups
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure -V
 ```
 
-Building on RHEL/CentOS:
+Use `-DHICCUPS_WARNINGS_AS_ERRORS=ON` to treat GCC/Clang warnings as errors.
+
+Install to a user-selected prefix:
 
 ```
-sudo yum install cmake3 g++
-cd hiccups
-mkdir build && cd build
-cmake3 .. -DCMAKE_BUILD_TYPE=Release
-make
+cmake --install build --prefix "$HOME/.local"
 ```
 
-Installing:
+The executable is installed in `bin` by default. Set `CMAKE_INSTALL_BINDIR` at
+configure time to choose another directory.
 
-```
-$ sudo make install
-```
+CTest runs startup regression checks and a measurement smoke test. Startup
+checks require at least two allowed CPUs; the partial-startup cancellation
+check requires three. Successful memory-lock testing depends on the runner's
+memory-lock limit. Unsupported cases print a skip reason, and the smoke test
+runs even on a single CPU.
 
-Linux startup regression checks (requires Python 3, a C compiler, and at least
-three allowed CPUs):
+The startup checks can also be run directly:
 
 ```
 python3 tests/startup.py build/hiccups
+```
+
+The smoke test uses no preloaded hooks and disables memory locking, so it can
+run with AddressSanitizer and UndefinedBehaviorSanitizer:
+
+```
+cmake -S . -B build-sanitized -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+cmake --build build-sanitized --parallel
+UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-sanitized \
+  -L smoke --output-on-failure
 ```
 
 ## About
