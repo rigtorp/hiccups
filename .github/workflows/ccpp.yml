@@ -1,15 +1,70 @@
 name: C/C++ CI
 
-on: [push]
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-ubuntu:
-
-    runs-on: ubuntu-latest
-    
+  build:
+    name: Linux ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: GCC
+            cc: gcc
+            cxx: g++
+          - name: Clang
+            cc: clang
+            cxx: clang++
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
     steps:
-    - uses: actions/checkout@v1
-    - name: configure
-      run: mkdir build && cd build && cmake -DCMAKE_CXX_FLAGS="-Werror" ..
-    - name: build
-      run: cmake --build build
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHICCUPS_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -V
+      - name: Install
+        run: cmake --install build --prefix "$RUNNER_TEMP/hiccups-install"
+      - name: Test installed executable
+        run: python3 tests/smoke.py "$RUNNER_TEMP/hiccups-install/bin/hiccups"
+
+  sanitizers:
+    name: Linux Clang ASan/UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CC: clang
+      CXX: clang++
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Configure
+        run: >-
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+          -DHICCUPS_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test with sanitizers
+        run: ctest --test-dir build -L smoke --output-on-failure -V
