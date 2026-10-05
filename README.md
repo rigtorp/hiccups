@@ -45,6 +45,13 @@ percentile being much lower then the other CPUs.
 *hiccups* requires [CMake](https://cmake.org/) 3.2 or higher and a C++17
 compiler.
 
+Measurements start after all worker threads are ready and memory locking has
+been attempted. Memory locking includes worker stacks as well as sample buffers;
+if the process exceeds `RLIMIT_MEMLOCK`, hiccups prints a warning and continues
+without locked memory. Increase the limit or grant `CAP_IPC_LOCK` if locked
+memory is required. Failure to create a worker thread exits with an error;
+check process/thread limits and available memory.
+
 Building on Debian/Ubuntu:
 
 ```
@@ -69,6 +76,13 @@ Installing:
 
 ```
 $ sudo make install
+```
+
+Linux startup regression checks (requires Python 3, a C compiler, and at least
+three allowed CPUs):
+
+```
+python3 tests/startup.py build/hiccups
 ```
 
 ## About
